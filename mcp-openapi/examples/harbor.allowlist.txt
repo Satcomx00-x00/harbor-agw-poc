@@ -1,0 +1,17 @@
+# Harbor API 2.0 — read-only surface.
+#
+# Paths are as they appear in the document, which for a Swagger 2.0 spec means
+# without the basePath (/api/v2.0). The server joins that back on.
+
+GET /users/current
+GET /health
+GET /statistics
+GET /search
+
+GET /projects
+GET /projects/{project_name}/repositories
+GET /projects/{project_name}/repositories/{repository_name}/artifacts
+
+# POST /projects and POST .../artifacts exist in the spec and are deliberately
+# absent here: this deployment is read-only. Nothing above matches them, so
+# they are neither listed nor callable.

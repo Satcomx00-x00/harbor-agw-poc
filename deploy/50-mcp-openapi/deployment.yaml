@@ -1,0 +1,145 @@
+# mcp-openapi, pointed at Harbor.
+#
+# Nothing in this manifest is Harbor-specific except three environment
+# variables and one ConfigMap. Change those and the same image serves a
+# different API — which is the point of the component.
+#
+# Deployed alongside mcp-harbor rather than replacing it: the two expose the
+# same registry through the same identity chain, one hand-written and one
+# generated, which is the comparison worth having before choosing.
+#
+# Runs from a stock node:22-alpine with dist/ from a ConfigMap, for the same
+# reason as mcp-harbor — see the README section "Building the real image".
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-openapi
+  namespace: mcp
+spec:
+  selector:
+    app: mcp-openapi
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-openapi
+  namespace: mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-openapi
+  template:
+    metadata:
+      labels:
+        app: mcp-openapi
+      annotations:
+        lab.mcp-openapi/checksum: "unset"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      initContainers:
+        - name: install
+          image: node:22-alpine
+          workingDir: /app
+          command:
+            - sh
+            - -ec
+            - |
+              mkdir -p /app/dist
+              cp /src/package.json /src/package-lock.json /app/
+              cp /src/*.js /app/dist/
+              npm ci --omit=dev --no-audit --no-fund
+          volumeMounts:
+            - { name: src, mountPath: /src, readOnly: true }
+            - { name: app, mountPath: /app }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+      containers:
+        - name: mcp-openapi
+          image: node:22-alpine
+          workingDir: /app
+          command: ["node", "dist/index.js"]
+          env:
+            # The document. A URL is fetched at start-up, so the server tracks
+            # whatever the service currently publishes; a path into the mounted
+            # ConfigMap would pin it instead. Both are supported.
+            - name: OPENAPI_SPEC
+              value: https://harbor.192.168.1.200.nip.io/swagger.json
+
+            # The allowlist. This is the file that decides the exposed surface;
+            # everything else in the document is unreachable.
+            - name: OPENAPI_ALLOWLIST
+              value: /etc/mcp/allowlist.txt
+
+            # Overrides the origin only. Harbor's document declares
+            # `host: localhost` with `basePath: /api/v2.0`, and the base path is
+            # kept — see resolveBaseUrl() in src/index.ts.
+            - name: UPSTREAM_BASE_URL
+              value: https://harbor.192.168.1.200.nip.io
+
+            # Forward the caller's Keycloak token upstream. Set to `none` for a
+            # service that needs no credential; callers still have to
+            # authenticate to agentgateway either way.
+            - name: UPSTREAM_AUTH
+              value: oidc
+
+            # Namespaces this server's tools. Load-bearing: agentgateway is
+            # configured with prefixMode: never, so uniqueness across the
+            # multiplexed servers has to come from here.
+            - name: MCP_TOOL_PREFIX
+              value: openapi
+
+            - name: MCP_SERVER_NAME
+              value: mcp-openapi
+
+            - name: PORT
+              value: "8080"
+            - name: DEBUG
+              value: "true"
+
+            # Harbor and Keycloak are served from the private lab CA. Node
+            # ignores the system trust store, so this is what makes both the
+            # spec fetch and every upstream call work.
+            - name: NODE_EXTRA_CA_CERTS
+              value: /etc/lab-ca/ca.crt
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - { name: app, mountPath: /app }
+            - { name: allowlist, mountPath: /etc/mcp, readOnly: true }
+            - { name: lab-ca, mountPath: /etc/lab-ca, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+      volumes:
+        - name: src
+          configMap:
+            name: mcp-openapi-src
+        - name: allowlist
+          configMap:
+            name: mcp-openapi-allowlist
+        - name: app
+          emptyDir: {}
+        - name: lab-ca
+          configMap:
+            name: lab-ca

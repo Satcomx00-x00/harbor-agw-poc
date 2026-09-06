@@ -10,7 +10,8 @@ Four moving parts on the `cluster-dev-1` Talos cluster:
 | **Keycloak** | `https://keycloak.192.168.1.200.nip.io` | issues the identity |
 | **Harbor** | `https://harbor.192.168.1.200.nip.io` | the registry, in `oidc_auth` mode |
 | **agentgateway** | `https://mcp.192.168.1.200.nip.io/mcp` | validates the JWT, forwards it |
-| **mcp-harbor** | in-cluster | the MCP server, with no credentials of its own |
+| **mcp-harbor** | in-cluster | hand-written MCP server, no credentials of its own |
+| **mcp-openapi** | in-cluster | the same, generated from an OpenAPI document + an allowlist |
 
 ```
 MCP client ──token──▶ agentgateway ──same token──▶ mcp-harbor ──same token──▶ Harbor
@@ -32,10 +33,14 @@ looks like: **[docs/keycloak-setup.md](docs/keycloak-setup.md)**.
 ## Layout
 
 ```
-mcp-harbor/              the MCP server (TypeScript, streamable HTTP)
+mcp-harbor/              hand-written MCP server for Harbor
   src/index.ts           stateless transport; the token lives one request
   src/harbor.ts          Harbor API client, bound to one caller's token
   src/tools.ts           seven read-only tools
+mcp-openapi/             template MCP server: any OpenAPI document + an allowlist
+  src/spec.ts            loads the document, builds the client from it
+  src/allowlist.ts       the file that decides the exposed surface
+  examples/              allowlists for Harbor and for an unauthenticated API
 deploy/
   00-prereqs/            storage, ingress, cert-manager, the lab CA
   10-keycloak/           Keycloak + postgres + the `lab` realm
@@ -45,6 +50,7 @@ deploy/
 docs/
   auth-flow.md           how one token crosses four systems
   keycloak-setup.md      what to configure in Keycloak, and why
+  openapi-mcp.md         the template server: allowlist, auth modes, limits
 scripts/
   init-secrets.sh        generates lab.env
   bootstrap.sh           all of it, in order, re-runnable
@@ -144,12 +150,18 @@ first place, and the way back in when OIDC breaks.
 
 ## Tools
 
-All read-only. `harbor_whoami` is the useful one — it distinguishes "the token
-never arrived" from "the token arrived and this user lacks access", which is
-otherwise a long afternoon.
+Two servers are multiplexed behind one MCP endpoint, in two namespaces.
 
-`harbor_list_projects`, `harbor_list_repositories`, `harbor_list_artifacts`,
-`harbor_get_artifact`, `harbor_search`, `harbor_system_info`.
+`harbor_*` — hand-written (`mcp-harbor/`). `harbor_whoami` is the useful one: it
+distinguishes "the token never arrived" from "the token arrived and this user
+lacks access", which is otherwise a long afternoon.
+
+`openapi_*` — generated (`mcp-openapi/`) from Harbor's own OpenAPI document,
+restricted by `mcp-openapi/examples/harbor.allowlist.txt`. Point it at a
+different document and it serves a different API with no code change. See
+[docs/openapi-mcp.md](docs/openapi-mcp.md).
+
+Both receive the same forwarded token, so both resolve to the same Harbor user.
 
 ## Known rough edges
 

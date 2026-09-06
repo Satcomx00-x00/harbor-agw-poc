@@ -8,5 +8,6 @@ cd "$(dirname "$0")"
 ./30-onboard.sh
 ./40-mcp.sh
 ./50-agentgateway.sh
+./60-mcp-openapi.sh
 step "smoke test"
 "$PYTHON" ./smoke-test.py

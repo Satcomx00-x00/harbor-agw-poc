@@ -12,6 +12,10 @@ It asserts the things that are easy to believe without checking:
   * harbor_whoami comes back with the *caller's* username, which is the only
     proof the identity survived all three hops rather than being replaced by a
     service account somewhere in the middle
+  * the generic OpenAPI-driven server is mounted alongside the hand-written one
+    and resolves the same caller
+  * an operation present in the spec but absent from the allowlist is not
+    exposed as a tool
   * two different users see themselves, not each other
 
 Credentials come from lab.env (or the matching environment variables), so
@@ -207,7 +211,10 @@ def main() -> int:
 
     init = body_json(raw)
     server_name = init.get("result", {}).get("serverInfo", {}).get("name")
-    check("server behind the gateway is mcp-harbor", server_name == "mcp-harbor", str(server_name))
+    # agentgateway answers as itself once it multiplexes more than one target:
+    # the client is talking to the gateway, which aggregates the backends. The
+    # backends are identified by their tool namespaces instead, checked below.
+    check("the gateway answered initialize", server_name == "agentgateway", str(server_name))
 
     # The transport requires this notification before normal traffic.
     rpc(session, idt, "notifications/initialized", rid=None)
@@ -235,7 +242,37 @@ def main() -> int:
         f"got {who.get('username')!r}",
     )
 
-    print("\n=== 6. a second user is not the first ===")
+    print("\n=== 6. the generic OpenAPI server is mounted alongside ===")
+    # mcp-openapi builds its tools from Harbor's own OpenAPI document, filtered
+    # by an allowlist. Its presence here proves the gateway multiplexes both
+    # servers and that the same forwarded token reaches both.
+    generic = [t for t in tools if t.startswith("openapi_")]
+    check("openapi_* tools are present", bool(generic), f"{len(generic)} of {len(tools)}")
+    check(
+        "an operation absent from the allowlist is not exposed",
+        not any(t.startswith("openapi_createProject") for t in tools),
+        "POST /projects exists in the spec and is not allowlisted",
+    )
+
+    if generic:
+        code, _, raw = rpc(
+            session, idt, "tools/call",
+            {"name": "openapi_getCurrentUserInfo", "arguments": {}}, rid=7,
+        )
+        gres = body_json(raw).get("result", {})
+        gtext = (gres.get("content") or [{}])[0].get("text", "")
+        gwho = {}
+        try:
+            gwho = json.loads(gtext)
+        except Exception:
+            pass
+        check(
+            f"the generic server also resolves the caller as '{args.user}'",
+            gwho.get("username") == args.user,
+            f"got {gwho.get('username')!r}",
+        )
+
+    print("\n=== 7. a second user is not the first ===")
     tok2 = get_token(args.also_user, args.also_password)
     idt2 = tok2["id_token"]
     code, headers2, raw = rpc(
@@ -246,7 +283,7 @@ def main() -> int:
     )
     session2 = headers2.get("Mcp-Session-Id") or headers2.get("mcp-session-id")
     rpc(session2, idt2, "notifications/initialized", rid=None)
-    code, _, raw = rpc(session2, idt2, "tools/call", {"name": "harbor_whoami", "arguments": {}}, rid=4)
+    code, _, raw = rpc(session2, idt2, "tools/call", {"name": "harbor_whoami", "arguments": {}}, rid=8)
     text2 = (body_json(raw).get("result", {}).get("content") or [{}])[0].get("text", "")
     who2 = {}
     try:

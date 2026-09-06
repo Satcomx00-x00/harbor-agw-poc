@@ -1,0 +1,9 @@
+# httpbin.org — the UPSTREAM_AUTH=none case.
+#
+# httpbin needs no credential, so the MCP sends none. Callers still have to
+# authenticate to agentgateway to reach the tool at all: `none` describes what
+# goes upstream, not who may call.
+
+GET /get
+GET /status/{code}
+GET /headers

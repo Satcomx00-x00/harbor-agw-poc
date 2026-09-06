@@ -1,0 +1,29 @@
+{
+  "name": "mcp-openapi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Template MCP server: turns any OpenAPI document into MCP tools, restricted to an explicit allowlist",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "generate:types": "openapi-typescript \"$OPENAPI_SPEC\" -o src/generated/schema.d.ts"
+  },
+  "dependencies": {
+    "@apidevtools/json-schema-ref-parser": "16.0.2",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "express": "5.2.1",
+    "picomatch": "4.0.7"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/node": "26.4.1",
+    "@types/picomatch": "4.0.3",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}
