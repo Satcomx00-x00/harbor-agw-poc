@@ -1,0 +1,43 @@
+# ingress-nginx for a single-node Talos cluster with no load balancer.
+#
+# hostNetwork rather than a Service of type LoadBalancer: there is no cloud
+# controller and no MetalLB here, so the only way to own :80 and :443 on an
+# address the LAN can reach is to take them on the node itself. The node also
+# carries the Talos VIP (192.168.1.200), so binding 0.0.0.0 answers on both the
+# node address and the VIP, and *.192.168.1.200.nip.io resolves straight to it.
+controller:
+  kind: DaemonSet
+  hostNetwork: true
+  hostPort:
+    enabled: true
+  dnsPolicy: ClusterFirstWithHostNet
+
+  service:
+    # The Service would sit unused in front of a hostNetwork pod, and as
+    # LoadBalancer it would stay Pending forever.
+    enabled: false
+
+  ingressClassResource:
+    default: true
+
+  # This lab pushes container images through the ingress. nginx buffers a
+  # request body to disk and rejects anything over 1 MiB by default, which
+  # turns a `docker push` of any real layer into a 413 that Harbor reports as
+  # an opaque blob upload failure.
+  config:
+    proxy-body-size: "0"
+    use-forwarded-headers: "true"
+    # Harbor's blob uploads are slow on a lab disk; the defaults (60s) cut them.
+    proxy-read-timeout: "900"
+    proxy-send-timeout: "900"
+
+  # One node, one replica. An anti-affinity rule would leave it Pending.
+  replicaCount: 1
+
+  admissionWebhooks:
+    enabled: true
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi

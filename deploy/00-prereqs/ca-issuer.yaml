@@ -1,0 +1,43 @@
+# A private CA for the lab, and a ClusterIssuer that signs from it.
+#
+# Two steps rather than one because cert-manager's `selfSigned` issuer signs
+# each certificate with its own throwaway key: every service would end up with
+# an unrelated self-signed cert and a client would have to trust each one
+# separately. Signing them all from one CA means a client trusts a single
+# certificate — deploy/00-prereqs/lab-ca.crt, extracted by scripts/ca.sh — and
+# every hostname in the lab validates.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: lab-selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: lab-ca
+  # Must live in cert-manager's own namespace: a ClusterIssuer resolves its
+  # secretName there, not in the namespace of whatever asks for a certificate.
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: mcp-harbor-lab CA
+  secretName: lab-ca-tls
+  duration: 43800h    # 5 years; this is a lab CA, rotation is a reinstall
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: lab-selfsigned
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: lab-ca
+spec:
+  ca:
+    secretName: lab-ca-tls

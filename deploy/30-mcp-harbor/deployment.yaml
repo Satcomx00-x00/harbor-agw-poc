@@ -1,0 +1,128 @@
+# mcp-harbor.
+#
+# Runs from a stock node:22-alpine with the compiled `dist/` supplied by a
+# ConfigMap and dependencies installed by an init container, rather than from a
+# built image.
+#
+# That is a bootstrap shape, not the intended one. Building the real image
+# needs a builder (Docker Desktop, or an in-cluster BuildKit job) *and* the
+# cluster has to trust the lab CA before containerd can pull from Harbor over
+# HTTPS — which is a Talos machine-config change, not a Kubernetes one. Both
+# are worth doing; neither is needed to exercise the identity chain this lab is
+# about. See mcp-harbor/Dockerfile and the README section "Building the real
+# image" for the path.
+#
+# Everything else here is what the built version would use unchanged.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-harbor
+  namespace: mcp
+spec:
+  selector:
+    app: mcp-harbor
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-harbor
+  namespace: mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-harbor
+  template:
+    metadata:
+      labels:
+        app: mcp-harbor
+      annotations:
+        # Filled in by scripts/40-mcp.sh so a rebuilt dist/ actually restarts
+        # the pod; a ConfigMap change alone would not.
+        lab.mcp/checksum: "unset"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      initContainers:
+        # Rebuilds the layout and installs production dependencies into the
+        # shared emptyDir.
+        #
+        # Two reasons this is not a plain `cp -r`. ConfigMap keys cannot
+        # contain a slash, so `dist/index.js` arrives as a flat `index.js` and
+        # the directory has to be reconstructed here. And npm cannot write into
+        # a ConfigMap mount, which is read-only, so the copy is required before
+        # `npm ci` can create node_modules.
+        - name: install
+          image: node:22-alpine
+          workingDir: /app
+          command:
+            - sh
+            - -ec
+            - |
+              mkdir -p /app/dist
+              cp /src/package.json /src/package-lock.json /app/
+              cp /src/*.js /app/dist/
+              npm ci --omit=dev --no-audit --no-fund
+          volumeMounts:
+            - { name: src, mountPath: /src, readOnly: true }
+            - { name: app, mountPath: /app }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+      containers:
+        - name: mcp-harbor
+          image: node:22-alpine
+          workingDir: /app
+          command: ["node", "dist/index.js"]
+          env:
+            - name: HARBOR_URL
+              value: https://harbor.192.168.1.200.nip.io
+            - name: PORT
+              value: "8080"
+            - name: DEBUG
+              value: "true"
+            # Harbor is served with a certificate from the lab CA. Node has its
+            # own bundled trust store and ignores the system one, so pointing
+            # it at the CA explicitly is the only thing that makes the
+            # HarborClient's fetch() succeed. The alternative people reach for
+            # — NODE_TLS_REJECT_UNAUTHORIZED=0 — disables verification for every
+            # connection the process makes, which is a much larger blast radius
+            # than trusting one known CA.
+            - name: NODE_EXTRA_CA_CERTS
+              value: /etc/lab-ca/ca.crt
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - { name: app, mountPath: /app }
+            - { name: lab-ca, mountPath: /etc/lab-ca, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+      volumes:
+        - name: src
+          configMap:
+            name: mcp-harbor-src
+        - name: app
+          emptyDir: {}
+        - name: lab-ca
+          configMap:
+            name: lab-ca

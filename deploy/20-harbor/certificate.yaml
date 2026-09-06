@@ -1,0 +1,19 @@
+# Harbor's TLS certificate, from the lab CA.
+#
+# Issued here rather than letting the Harbor chart self-sign: a chart-generated
+# certificate is signed by a CA that exists only inside the release, so the MCP
+# server and any docker client would each have to trust a different root. One
+# lab CA, one thing to trust.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: harbor-tls
+  namespace: harbor
+spec:
+  secretName: harbor-tls
+  dnsNames:
+    - harbor.192.168.1.200.nip.io
+  issuerRef:
+    name: lab-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

@@ -1,0 +1,86 @@
+# Harbor, chart 1.19.2, single-node lab.
+#
+# OIDC is deliberately *not* configured here. The chart has no values for auth
+# mode, so it is set afterwards through the Harbor API by
+# scripts/30-harbor-oidc.sh — which also means the settings survive a
+# `helm upgrade` instead of being reverted by it.
+
+expose:
+  type: ingress
+  tls:
+    enabled: true
+    certSource: secret
+    secret:
+      # Issued by the lab CA; see deploy/20-harbor/certificate.yaml.
+      secretName: harbor-tls
+  ingress:
+    hosts:
+      core: harbor.192.168.1.200.nip.io
+    className: nginx
+    annotations:
+      # Image layers are large and slow on a lab disk. Without these an image
+      # push dies mid-blob and Harbor reports it as a generic upload failure.
+      nginx.ingress.kubernetes.io/proxy-body-size: "0"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "900"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "900"
+
+# Must match what the browser and the MCP server use, or Harbor builds OIDC
+# redirect URLs and registry pull references pointing somewhere unreachable.
+externalURL: https://harbor.192.168.1.200.nip.io
+
+# harborAdminPassword is deliberately absent: scripts/20-harbor.sh passes it
+# with --set from lab.env, so no credential is tracked in this repo. That
+# account stays usable for the API after auth_mode flips to oidc_auth, which is
+# both how OIDC gets configured and the way back in when it breaks.
+
+persistence:
+  enabled: true
+  persistentVolumeClaim:
+    registry:
+      storageClass: local-path
+      size: 40Gi
+    jobservice:
+      jobLog:
+        storageClass: local-path
+        size: 2Gi
+    database:
+      storageClass: local-path
+      size: 4Gi
+    redis:
+      storageClass: local-path
+      size: 2Gi
+
+# Off for now: Trivy pulls a multi-hundred-megabyte vulnerability database on
+# first run and keeps a Go process resident for it. Turn it back on when you
+# want scan results in harbor_get_artifact's scan overview.
+trivy:
+  enabled: false
+
+# The metrics exporter is another pod for numbers nothing here reads.
+metrics:
+  enabled: false
+
+core:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+jobservice:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+registry:
+  registry:
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+  controller:
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+portal:
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+database:
+  internal:
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+redis:
+  internal:
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }

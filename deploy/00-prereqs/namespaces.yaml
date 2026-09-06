@@ -1,0 +1,45 @@
+# Namespaces that need PodSecurity relaxed.
+#
+# Talos enforces the `baseline` PodSecurity profile on every namespace except
+# kube-system. Two things in this lab are forbidden by baseline and would be
+# rejected at admission with messages that point at the pod rather than at the
+# policy:
+#
+#   ingress-nginx   hostNetwork + hostPort (baseline forbids both)
+#   harbor          the chart's jobservice/registry run with a fixed fsGroup
+#                   and Trivy wants a writable cache; keep it out of the way
+#
+# local-path-storage carries the same label, applied inside its own vendored
+# manifest so the two travel together.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keycloak
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: harbor
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcp

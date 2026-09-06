@@ -1,0 +1,113 @@
+# agentgateway — the front door for MCP traffic.
+#
+# The config itself lives in deploy/40-agentgateway/config.yaml and is loaded
+# into the `agentgateway-config` ConfigMap by scripts/50-agentgateway.sh, so it
+# can stay a plain file that editors validate against the published schema
+# rather than a string embedded in YAML.
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentgateway
+  namespace: mcp
+spec:
+  selector:
+    app: agentgateway
+  ports:
+    - name: mcp
+      port: 3000
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentgateway
+  namespace: mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agentgateway
+  template:
+    metadata:
+      labels:
+        app: agentgateway
+      annotations:
+        lab.agentgateway/checksum: "unset"
+    spec:
+      containers:
+        - name: agentgateway
+          # v1.5.0, not 1.5.0: the image tags carry the leading v even though
+          # the GitHub release page drops it in places.
+          image: ghcr.io/agentgateway/agentgateway:v1.5.0
+          args: ["-f", "/etc/agentgateway/config.yaml"]
+          ports:
+            - name: mcp
+              containerPort: 3000
+          volumeMounts:
+            - name: config
+              mountPath: /etc/agentgateway
+              readOnly: true
+          readinessProbe:
+            tcpSocket: { port: 3000 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: 3000 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 512Mi }
+      volumes:
+        - name: config
+          configMap:
+            name: agentgateway-config
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mcp-tls
+  namespace: mcp
+spec:
+  secretName: mcp-tls
+  dnsNames:
+    - mcp.192.168.1.200.nip.io
+  issuerRef:
+    name: lab-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentgateway
+  namespace: mcp
+  annotations:
+    # MCP over streamable HTTP can hold a response open. Without these the
+    # ingress cuts a slow tool call at 60s and the client sees a truncated
+    # stream rather than an error.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [mcp.192.168.1.200.nip.io]
+      secretName: mcp-tls
+  rules:
+    - host: mcp.192.168.1.200.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentgateway
+                port:
+                  number: 3000

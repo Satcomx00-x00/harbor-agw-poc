@@ -1,0 +1,165 @@
+# Keycloak 26, behind the ingress, importing the `lab` realm on first start.
+#
+# Hostname handling is the part that repays attention. Every consumer of this
+# issuer — Harbor, agentgateway, and any MCP client — compares the `iss` claim
+# of a token against the URL it thinks Keycloak lives at. If Keycloak advertises
+# one URL and something reaches it by another, the token is rejected with a
+# signature-looking error that has nothing to do with signatures.
+#
+# So KC_HOSTNAME pins the public URL, and *everything* uses it, in-cluster
+# callers included: nip.io resolves the name to the node address, the ingress is
+# on hostNetwork there, and the request comes back in. The one exception is
+# agentgateway's JWKS fetch, which is pointed at the in-cluster Service so it
+# does not need to trust the lab CA — `iss` and the JWKS URL are separate
+# fields precisely so they can disagree about transport while agreeing about
+# identity.
+#
+# The `keycloak-admin` and `keycloak-db` Secrets are created by
+# scripts/10-keycloak.sh from lab.env.
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  selector:
+    app: keycloak
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+      annotations:
+        # Restart when the realm changes, so re-importing does not need a
+        # manual rollout. The value is filled in by scripts/20-keycloak.sh.
+        lab.realm/checksum: "unset"
+    spec:
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.7.3
+          args:
+            - start
+            - --import-realm
+          env:
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL_HOST
+              value: keycloak-db
+            - name: KC_DB_URL_DATABASE
+              value: keycloak
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef: { name: keycloak-db, key: POSTGRES_USER }
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: keycloak-db, key: POSTGRES_PASSWORD }
+
+            # The public URL, and the value that ends up in every `iss` claim.
+            - name: KC_HOSTNAME
+              value: https://keycloak.192.168.1.200.nip.io
+            # TLS terminates at the ingress, so Keycloak itself speaks plain
+            # HTTP and must be told the scheme from X-Forwarded-Proto. Without
+            # KC_PROXY_HEADERS it builds redirect URLs with http:// and the
+            # browser login loop never completes.
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            - name: KC_METRICS_ENABLED
+              value: "true"
+            # Renamed in Keycloak 26: KEYCLOAK_ADMIN / KEYCLOAK_ADMIN_PASSWORD
+            # are ignored now and the container starts with no admin at all.
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef: { name: keycloak-admin, key: KC_BOOTSTRAP_ADMIN_USERNAME }
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: keycloak-admin, key: KC_BOOTSTRAP_ADMIN_PASSWORD }
+          ports:
+            - name: http
+              containerPort: 8080
+            # KC_HEALTH_ENABLED serves /health on the separate management port,
+            # not on 8080, which is why the probes below target 9000.
+            - name: management
+              containerPort: 9000
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 9000
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 9000
+            initialDelaySeconds: 90
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 200m
+              memory: 768Mi
+            limits:
+              memory: 2Gi
+      volumes:
+        - name: realm
+          configMap:
+            name: keycloak-realm
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: keycloak-tls
+  namespace: keycloak
+spec:
+  secretName: keycloak-tls
+  dnsNames:
+    - keycloak.192.168.1.200.nip.io
+  issuerRef:
+    name: lab-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [keycloak.192.168.1.200.nip.io]
+      secretName: keycloak-tls
+  rules:
+    - host: keycloak.192.168.1.200.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080

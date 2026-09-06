@@ -1,0 +1,84 @@
+# yaml-language-server: $schema=https://agentgateway.dev/schema/config
+#
+# agentgateway: the only thing MCP clients talk to.
+#
+# It does three jobs here, and the third is the one that makes the lab work.
+#
+#   1. Validates the caller's JWT against Keycloak (mcpAuthentication, strict).
+#   2. Publishes OAuth protected-resource metadata, so an MCP client that
+#      arrives without a token is told where to go and gets one on its own.
+#   3. Forwards that same token to mcp-harbor (backendAuth: passthrough).
+#
+# Without (3) the gateway would strip the credential after validating it —
+# that is agentgateway's default, and the right default, since a backend
+# usually has no business seeing the client's token. Here it is exactly what
+# the backend needs: mcp-harbor has no identity of its own and calls Harbor as
+# the caller.
+binds:
+  - port: 3000
+    listeners:
+      - name: mcp
+        protocol: HTTP
+        routes:
+          - name: mcp-harbor
+            matches:
+              - path:
+                  pathPrefix: /mcp
+
+            policies:
+              mcpAuthentication:
+                # `iss` is compared against this exact string, so it must be
+                # the public URL Keycloak advertises — not the in-cluster
+                # Service, even though that is what we actually dial below.
+                issuer: https://keycloak.192.168.1.200.nip.io/realms/lab
+
+                # The audience the Keycloak realm's `audience-mcp-gateway`
+                # mapper adds. The same token also carries `harbor`, which is
+                # what lets one credential satisfy this gateway and the Harbor
+                # API at the far end. See docs/auth-flow.md.
+                audiences:
+                  - mcp-gateway
+
+                provider:
+                  keycloak: {}
+
+                # Dialled over plain HTTP inside the cluster, on purpose. The
+                # public URL is served with a certificate from the private lab
+                # CA, and pointing the gateway at the Service avoids having to
+                # inject that CA here. `issuer` and `jwks` are separate fields
+                # precisely so they can differ in transport while agreeing on
+                # identity.
+                jwks:
+                  url: http://keycloak.keycloak.svc.cluster.local:8080/realms/lab/protocol/openid-connect/certs
+
+                # Reject anything without a valid token. `optional` and
+                # `permissive` both let unauthenticated requests through and,
+                # worse, suppress the 401 that tells a client to start an
+                # OAuth flow.
+                mode: strict
+
+                resourceMetadata:
+                  resource: https://mcp.192.168.1.200.nip.io/mcp
+                  scopes_supported: [openid, profile, email]
+                  bearer_methods_supported: [header]
+
+              # Forward the validated token to the backend.
+              backendAuth:
+                passthrough: {}
+
+              # Tool-level authorization, evaluated per call against the JWT.
+              # Everything is allowed for now; the rule is here as the place to
+              # put a real one, e.g.
+              #   'jwt.preferred_username == "dev" || mcp.tool.name.startsWith("harbor_list")'
+              mcpAuthorization:
+                rules:
+                  - "true"
+
+            backends:
+              - mcp:
+                  targets:
+                    - name: harbor
+                      mcp:
+                        host: mcp-harbor.mcp.svc.cluster.local
+                        port: 8080
+                        path: /mcp

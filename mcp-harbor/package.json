@@ -1,0 +1,26 @@
+{
+  "name": "mcp-harbor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP server exposing a Harbor registry, acting strictly on the caller's forwarded OIDC identity",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "express": "5.2.1",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/node": "26.4.1",
+    "typescript": "7.0.2"
+  }
+}

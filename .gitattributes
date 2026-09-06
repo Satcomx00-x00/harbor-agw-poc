@@ -1,0 +1,8 @@
+# This repo is edited on Windows and every byte it produces is consumed on
+# Linux: shell scripts run in pods and on the Proxmox node, and YAML is parsed
+# by Kubernetes. A CRLF in a .sh is a script bash will not parse.
+*        text eol=lf
+*.sh     text eol=lf
+*.py     text eol=lf
+*.yaml   text eol=lf
+*.json   text eol=lf

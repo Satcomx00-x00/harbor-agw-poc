@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# The whole lab, in order. Re-runnable.
+source "$(dirname "$0")/lib.sh"
+cd "$(dirname "$0")"
+./00-prereqs.sh
+./10-keycloak.sh
+./20-harbor.sh
+./30-onboard.sh
+./40-mcp.sh
+./50-agentgateway.sh
+step "smoke test"
+"$PYTHON" ./smoke-test.py

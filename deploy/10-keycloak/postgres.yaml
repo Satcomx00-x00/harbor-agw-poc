@@ -1,0 +1,84 @@
+# Postgres for Keycloak.
+#
+# A StatefulSet with one replica rather than a Deployment: the local-path
+# provisioner binds a PVC to a directory on one node, and a Deployment's
+# rolling update would try to start the new pod before the old one released
+# the volume, so it would deadlock on every change. A StatefulSet stops the
+# old pod first.
+#
+# The `keycloak-db` Secret it reads is created by scripts/10-keycloak.sh from
+# lab.env, not defined here - nothing tracked in this repo holds a credential.
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-db
+  namespace: keycloak
+spec:
+  clusterIP: None
+  selector:
+    app: keycloak-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: keycloak-db
+  namespace: keycloak
+spec:
+  serviceName: keycloak-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak-db
+  template:
+    metadata:
+      labels:
+        app: keycloak-db
+    spec:
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: postgres:17.11-alpine
+          envFrom:
+            - secretRef:
+                name: keycloak-db
+          env:
+            # The image refuses to initdb into a non-empty directory, and a
+            # PVC root arrives with lost+found on some backends. A subdirectory
+            # sidesteps the whole question.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+              name: postgres
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "keycloak", "-d", "keycloak"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "keycloak", "-d", "keycloak"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 4Gi
