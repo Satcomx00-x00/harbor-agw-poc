@@ -13,11 +13,12 @@ npm ci --no-audit --no-fund
 npm run build
 
 step "ship dist/ and the allowlist"
-$KUBECTL -n mcp create configmap mcp-openapi-src \
-  --from-file=package.json --from-file=package-lock.json \
-  --from-file=dist/index.js --from-file=dist/config.js --from-file=dist/spec.js \
-  --from-file=dist/allowlist.js --from-file=dist/client.js \
-  --dry-run=client -o yaml | $KUBECTL apply -f -
+# --from-file per module rather than a hand-kept list, so adding a source file
+# does not mean remembering to add it here too. Source maps are left out: they
+# would double the ConfigMap for no benefit inside a pod.
+SRC_ARGS=(--from-file=package.json --from-file=package-lock.json)
+for f in dist/*.js; do SRC_ARGS+=(--from-file="$f"); done
+$KUBECTL -n mcp create configmap mcp-openapi-src "${SRC_ARGS[@]}"   --dry-run=client -o yaml | $KUBECTL apply -f -
 
 # The allowlist is the access-control surface, so it is mounted as its own
 # ConfigMap rather than baked into the image: changing what is exposed should

@@ -6,7 +6,7 @@
  * server, with no code change.
  */
 
-export type UpstreamAuth = "oidc" | "none";
+import { isUpstreamAuthMode, UPSTREAM_AUTH_MODES, type UpstreamAuthMode } from "./auth.js";
 
 export interface Config {
   /** OpenAPI document: a path on disk or an http(s) URL. */
@@ -35,7 +35,7 @@ export interface Config {
    * Note this is entirely separate from *inbound* authentication, which is not
    * optional and is not performed here. See README.
    */
-  upstreamAuth: UpstreamAuth;
+  upstreamAuth: UpstreamAuthMode;
 
   /** MCP server name advertised to clients. Defaults to the spec's title. */
   serverName: string | undefined;
@@ -77,8 +77,10 @@ function bool(name: string, fallback: boolean): boolean {
 
 export function loadConfig(): Config {
   const auth = (process.env.UPSTREAM_AUTH ?? "oidc").toLowerCase();
-  if (auth !== "oidc" && auth !== "none") {
-    throw new Error(`UPSTREAM_AUTH must be "oidc" or "none", got "${auth}"`);
+  if (!isUpstreamAuthMode(auth)) {
+    throw new Error(
+      `UPSTREAM_AUTH must be one of ${UPSTREAM_AUTH_MODES.join(", ")}, got "${auth}"`,
+    );
   }
 
   return {

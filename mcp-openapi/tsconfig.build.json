@@ -1,0 +1,14 @@
+{
+  // Production emit: src only.
+  //
+  // tsconfig.json deliberately includes test/ as well, because ESLint's
+  // type-aware rules and the editor both need every file to belong to a
+  // project. Emitting from it would put the tests in dist/, which the
+  // Kubernetes manifests copy verbatim.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts"]
+}

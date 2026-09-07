@@ -33,8 +33,9 @@ const cfg = loadConfig();
 function bearer(req: Request): string | undefined {
   const h = req.headers.authorization;
   if (!h) return undefined;
-  const m = /^Bearer\s+(.+)$/i.exec(h);
-  return m?.[1]?.trim() || undefined;
+  const token = /^Bearer\s+(.+)$/i.exec(h)?.[1]?.trim();
+  // `??` would keep an empty string, which is not a usable credential.
+  return token === undefined || token === "" ? undefined : token;
 }
 
 /**
@@ -78,7 +79,10 @@ app.get("/readyz", (_req, res) => res.json({ status: "ok" }));
 
 app.post("/mcp", async (req: Request, res: Response) => {
   const token = bearer(req);
-  if (!token && !cfg.allowAnonymous) return unauthorized(res);
+  if (!token && !cfg.allowAnonymous) {
+    unauthorized(res);
+    return;
+  }
 
   const server = new McpServer(
     { name: "mcp-harbor", version: "0.1.0" },
@@ -140,7 +144,7 @@ for (const method of ["get", "delete"] as const) {
 
 app.listen(cfg.port, cfg.host, () => {
   console.error(
-    `mcp-harbor listening on ${cfg.host}:${cfg.port} -> ${cfg.harborUrl}` +
+    `mcp-harbor listening on ${cfg.host}:${String(cfg.port)} -> ${cfg.harborUrl}` +
       (cfg.allowAnonymous ? "  [ALLOW_ANONYMOUS is on — development only]" : ""),
   );
 });

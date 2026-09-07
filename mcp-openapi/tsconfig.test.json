@@ -1,0 +1,17 @@
+{
+  // Tests compile to their own tree.
+  //
+  // Node does not rewrite a ".js" import specifier to the ".ts" file beside it,
+  // so `node --test test/*.ts` cannot work while src/ uses the TypeScript
+  // convention of importing "./x.js". Compiling both into one tree sidesteps
+  // that without changing a single import in src/, and without disturbing the
+  // production build, whose dist/ layout the Kubernetes manifests depend on.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": ".test-build",
+    "sourceMap": true,
+    "declaration": false
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

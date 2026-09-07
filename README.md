@@ -51,6 +51,7 @@ docs/
   auth-flow.md           how one token crosses four systems
   keycloak-setup.md      what to configure in Keycloak, and why
   openapi-mcp.md         the template server: allowlist, auth modes, limits
+  code-quality.md        the tooling, what it found, and the patterns applied
 scripts/
   init-secrets.sh        generates lab.env
   bootstrap.sh           all of it, in order, re-runnable
@@ -76,6 +77,18 @@ cp lab.env.example lab.env     # and edit
 
 Losing `lab.env` means reinstalling: Keycloak's copy of the client secret and
 Harbor's have to stay equal, and neither can be read back out.
+
+## Checks
+
+```bash
+npm install        # repo-level tooling only; each MCP package installs its own
+npm run check      # typecheck + eslint + knip + tests
+```
+
+139 tests in about a second, 91% line coverage, and the lint runs
+type-aware. What the tooling found the first time it was pointed at this code —
+including two real defects and one design decision that had to be re-argued — is
+in [docs/code-quality.md](docs/code-quality.md).
 
 ## Prerequisites
 

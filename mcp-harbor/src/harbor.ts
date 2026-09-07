@@ -23,7 +23,7 @@ export class HarborError extends Error {
     readonly path: string,
     readonly body: string,
   ) {
-    super(`Harbor ${status} on ${path}: ${truncate(body, 500)}`);
+    super(`Harbor ${String(status)} on ${path}: ${truncate(body, 500)}`);
     this.name = "HarborError";
   }
 
@@ -71,7 +71,9 @@ export class HarborClient {
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
 
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), this.cfg.harborTimeoutMs);
+    const timer = setTimeout(() => {
+      ac.abort();
+    }, this.cfg.harborTimeoutMs);
 
     try {
       if (this.cfg.debug) {
@@ -87,12 +89,17 @@ export class HarborClient {
       const text = await res.text();
       if (!res.ok) throw new HarborError(res.status, url.pathname, text);
       return (text ? JSON.parse(text) : null) as T;
-    } catch (err) {
-      if (err instanceof HarborError) throw err;
-      if (err instanceof Error && err.name === "AbortError") {
-        throw new Error(`Harbor request timed out after ${this.cfg.harborTimeoutMs}ms: ${path}`);
+    } catch (cause) {
+      if (cause instanceof HarborError) throw cause;
+      if (cause instanceof Error && cause.name === "AbortError") {
+        // `cause` preserves the abort for anything reading the chain; the
+        // message states the budget, which the AbortError does not.
+        throw new Error(
+          `Harbor request timed out after ${String(this.cfg.harborTimeoutMs)}ms: ${path}`,
+          { cause },
+        );
       }
-      throw err;
+      throw cause;
     } finally {
       clearTimeout(timer);
     }

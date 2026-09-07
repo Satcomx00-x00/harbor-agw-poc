@@ -1,0 +1,23 @@
+{
+  "name": "harbor-agw-poc-tooling",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Repo-level static analysis. Deliberately NOT an npm workspace: each MCP package keeps its own package-lock.json, because the pods install from it with `npm ci` at start-up and workspaces would hoist the lockfile to the root where they cannot find it.",
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "knip": "knip",
+    "typecheck": "npm --prefix mcp-openapi run typecheck && npm --prefix mcp-harbor run typecheck",
+    "test": "npm --prefix mcp-openapi test",
+    "coverage": "npm --prefix mcp-openapi run test:coverage",
+    "check": "npm run typecheck && npm run lint && npm run knip && npm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.10.0",
+    "knip": "6.34.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0"
+  }
+}
