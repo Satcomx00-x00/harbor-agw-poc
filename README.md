@@ -10,8 +10,8 @@ Four moving parts on the `cluster-dev-1` Talos cluster:
 | **Keycloak** | `https://keycloak.192.168.1.200.nip.io` | issues the identity |
 | **Harbor** | `https://harbor.192.168.1.200.nip.io` | the registry, in `oidc_auth` mode |
 | **agentgateway** | `https://mcp.192.168.1.200.nip.io/mcp` | validates the JWT, forwards it |
-| **mcp-harbor** | in-cluster | hand-written MCP server, no credentials of its own |
-| **mcp-openapi** | in-cluster | the same, generated from an OpenAPI document + an allowlist |
+| **mcp-openapi** | in-cluster | the MCP server: generated from an OpenAPI document + an allowlist, no credentials of its own |
+| **mcp-harbor** | scaled to 0 | the hand-written equivalent, kept for comparison and out of the request path |
 
 ```
 MCP client ──token──▶ agentgateway ──same token──▶ mcp-harbor ──same token──▶ Harbor
@@ -163,18 +163,30 @@ first place, and the way back in when OIDC breaks.
 
 ## Tools
 
-Two servers are multiplexed behind one MCP endpoint, in two namespaces.
+Eleven, all `openapi_*`, all generated from Harbor's own OpenAPI document and
+selected by `mcp-openapi/examples/harbor.allowlist.txt`. Harbor's document
+declares 203 operations; the allowlist exposes 11, and nothing else is listed or
+callable. Point the server at a different document and it serves a different API
+with no code change — see [docs/openapi-mcp.md](docs/openapi-mcp.md).
 
-`harbor_*` — hand-written (`mcp-harbor/`). `harbor_whoami` is the useful one: it
+`openapi_getCurrentUserInfo` is the useful one when something breaks: it
 distinguishes "the token never arrived" from "the token arrived and this user
 lacks access", which is otherwise a long afternoon.
 
-`openapi_*` — generated (`mcp-openapi/`) from Harbor's own OpenAPI document,
-restricted by `mcp-openapi/examples/harbor.allowlist.txt`. Point it at a
-different document and it serves a different API with no code change. See
-[docs/openapi-mcp.md](docs/openapi-mcp.md).
+`mcp-harbor/`, the hand-written server this replaced, is still in the repository
+with its Deployment scaled to zero. Putting it back is one `replicas: 1` and one
+target in the gateway config.
 
-Both receive the same forwarded token, so both resolve to the same Harbor user.
+### Testing it
+
+```bash
+python3 scripts/smoke-test.py         # the auth chain, Keycloak -> Harbor
+python3 scripts/test-openapi-e2e.py   # mcp-openapi against the real Harbor
+```
+
+The second is the thorough one: reads with real parameters, a write (which is
+the Swagger 2.0 `in: body` path), Harbor's own per-caller permissions, and the
+failure modes. It creates a project and deletes it again.
 
 ## Known rough edges
 

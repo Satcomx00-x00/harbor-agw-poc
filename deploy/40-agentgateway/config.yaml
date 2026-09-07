@@ -75,34 +75,21 @@ binds:
                   - "true"
 
             backends:
-              # Two MCP servers multiplexed behind one endpoint. agentgateway
-              # prefixes tool names with the target name, so `listProjects` from
-              # the generic server becomes `openapi_listProjects` and cannot
-              # collide with the hand-written server's `harbor_list_projects`.
+              # One target: mcp-openapi, generated from Harbor's own OpenAPI
+              # document and restricted by an allowlist.
               #
-              # Both receive the same forwarded token: backendAuth is a route
-              # policy, so it applies to every target on the route.
+              # mcp-harbor, the hand-written server, used to sit alongside it
+              # here. It is still in the repository and still deployable — its
+              # Deployment is scaled to zero rather than deleted — but it is out
+              # of the request path, so this route exercises the template server
+              # against the real registry with nothing to fall back on.
+              #
+              # prefixMode: never keeps the names mcp-openapi emits. It already
+              # namespaces them with MCP_TOOL_PREFIX=openapi, so nothing here
+              # needs to add a second prefix.
               - mcp:
-                  # never: expose each server's tool names unchanged.
-                  #
-                  # The default (`always`) prefixes with the target name, which
-                  # here produces `harbor_harbor_whoami` — mcp-harbor already
-                  # namespaces its own tools. `conditional` does not help: it
-                  # prefixes whenever there is more than one target, which is
-                  # exactly this case.
-                  #
-                  # `never` requires names to be unique across targets, so that
-                  # is guaranteed at the source rather than hoped for:
-                  # mcp-harbor emits `harbor_*`, and mcp-openapi is given
-                  # MCP_TOOL_PREFIX=openapi. Two servers, two namespaces, no
-                  # collision possible whatever an allowlist later adds.
                   prefixMode: never
                   targets:
-                    - name: harbor
-                      mcp:
-                        host: mcp-harbor.mcp.svc.cluster.local
-                        port: 8080
-                        path: /mcp
                     - name: openapi
                       mcp:
                         host: mcp-openapi.mcp.svc.cluster.local

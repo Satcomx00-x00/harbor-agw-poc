@@ -1,17 +1,51 @@
-# Harbor API 2.0 — read-only surface.
+# Harbor API 2.0 — the surface this deployment exposes.
 #
-# Paths are as they appear in the document, which for a Swagger 2.0 spec means
-# without the basePath (/api/v2.0). The server joins that back on.
+# Paths are written as they appear in the document, which for a Swagger 2.0
+# spec means without the basePath (/api/v2.0). The server joins that back on.
+#
+# This is the whole access-control surface: anything not matched here is not
+# listed, not callable, and not reachable by guessing a tool name. Harbor's
+# document declares 203 operations; this exposes 11.
 
+# ── identity and instance ───────────────────────────────────────────────────
+# getCurrentUserInfo is the one that proves the caller's identity survived
+# agentgateway and reached Harbor as a person rather than a service account.
 GET /users/current
 GET /health
 GET /statistics
-GET /search
+GET /systeminfo
 
+# ── read the registry ───────────────────────────────────────────────────────
+GET /search
 GET /projects
+GET /projects/{project_name_or_id}
+# Harbor is inconsistent here and the document is the authority: the single
+# project is {project_name_or_id}, but the repositories subtree beneath it is
+# {project_name}. Writing the wrong one is a start-up failure, not two silently
+# missing tools.
 GET /projects/{project_name}/repositories
 GET /projects/{project_name}/repositories/{repository_name}/artifacts
 
-# POST /projects and POST .../artifacts exist in the spec and are deliberately
-# absent here: this deployment is read-only. Nothing above matches them, so
-# they are neither listed nor callable.
+# ── write ───────────────────────────────────────────────────────────────────
+# Deliberately included, and the only writes here.
+#
+# POST /projects is the operation that exercises a Swagger 2.0 `in: body`
+# parameter against the real service. That path was silently broken once — the
+# loader only looked at OpenAPI 3's requestBody — so a deployment that never
+# calls a write would never notice it regress.
+#
+# DELETE exists so the test can clean up after itself rather than leaving
+# projects behind on every run.
+POST   /projects
+DELETE /projects/{project_name_or_id}
+
+# ── deliberately absent ─────────────────────────────────────────────────────
+# Everything else in the document, including:
+#
+#   PUT    /projects/{project_name_or_id}   modify a project
+#   POST   /registries                      admin-only, would 403
+#   GET    /audit-logs                      not this deployment's business
+#   POST   /labels                          not this deployment's business
+#
+# Nothing above matches them, so they are neither listed nor callable. The
+# end-to-end test asserts exactly that for two of them.

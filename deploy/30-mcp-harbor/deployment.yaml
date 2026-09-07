@@ -32,7 +32,17 @@ metadata:
   name: mcp-harbor
   namespace: mcp
 spec:
-  replicas: 1
+  # Zero on purpose.
+  #
+  # mcp-openapi now serves Harbor through the same gateway, generated from
+  # Harbor's own OpenAPI document instead of hand-written. This one is kept —
+  # not deleted — because the two side by side are the comparison the lab was
+  # built to make, and because scaling it back to 1 plus adding its target in
+  # deploy/40-agentgateway/config.yaml is the whole of putting it back.
+  #
+  # Declared here rather than left as a `kubectl scale`, so that re-applying
+  # this manifest does not quietly bring it back into the request path.
+  replicas: 0
   selector:
     matchLabels:
       app: mcp-harbor

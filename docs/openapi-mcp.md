@@ -121,18 +121,24 @@ endpoint, so adding a service is a Deployment plus a target:
 - mcp:
     prefixMode: never
     targets:
-      - name: harbor
-        mcp: { host: mcp-harbor.mcp.svc.cluster.local,  port: 8080, path: /mcp }
       - name: openapi
         mcp: { host: mcp-openapi.mcp.svc.cluster.local, port: 8080, path: /mcp }
+      - name: other
+        mcp: { host: mcp-other.mcp.svc.cluster.local,   port: 8080, path: /mcp }
 ```
 
 `prefixMode: never` keeps tool names as each server emits them. The default
-(`always`) would produce `harbor_harbor_whoami`, since mcp-harbor already
-namespaces its own tools, and `conditional` does the same here — it prefixes
+(`always`) prefixes with the target name, and `conditional` does the same
 whenever there is more than one target. `never` requires names to be unique
-across targets, so that is guaranteed at the source rather than hoped for:
-mcp-harbor emits `harbor_*`, mcp-openapi is given `MCP_TOOL_PREFIX=openapi`.
+across targets, so that is guaranteed at the source — each instance gets its own
+`MCP_TOOL_PREFIX` — rather than hoped for.
+
+Two behaviours worth knowing:
+
+**With one target the gateway passes the backend's identity through.**
+`initialize` returns `serverInfo.name` of the backend (`mcp-openapi`). With
+several it answers as `agentgateway` and aggregates them. A test that asserts on
+`serverInfo` has to know which shape it is looking at.
 
 **Restart order matters.** agentgateway reads each target's tool list when it
 initialises. Change a backend's tools and restart the gateway *after* the
@@ -142,6 +148,34 @@ backend is serving, or it caches the old list:
 kubectl -n mcp rollout status deploy/mcp-openapi
 kubectl -n mcp rollout restart deploy/agentgateway
 ```
+
+## Verified against Harbor
+
+`scripts/test-openapi-e2e.py` drives the deployed server through agentgateway
+against the real registry, with the hand-written `mcp-harbor` scaled to zero so
+there is nothing to fall back on. 30 checks:
+
+| | |
+|---|---|
+| the way in | no token and a forged token are both refused at the gateway |
+| the surface | exactly the 11 allowlisted operations are tools; three that exist in the document are not |
+| the identity | Harbor resolves the caller to `dev`, and a second caller to `alice` |
+| reads | query parameters (`page_size=1`), templated path parameters (`{project_name}`), search |
+| a write | `POST /projects` — the Swagger 2.0 `in: body` path — then reading the project back and finding `dev` as its owner |
+| permissions | a private project is invisible to the other caller, who also cannot delete it |
+| failures | unknown tool, missing argument, unknown argument, upstream refusal with a hint |
+
+The write matters more than it looks: the request body is the one thing that
+differs structurally between the two dialects, and a deployment that only ever
+reads would never notice it regress.
+
+Two things that run found:
+
+- Harbor's own paths are inconsistent — `/projects/{project_name_or_id}` but
+  `/projects/{project_name}/repositories`. The allowlist's fail-fast on a rule
+  that matches nothing caught it at start-up instead of serving two fewer tools.
+- Harbor answers **403, not 404**, for a project you cannot see. It declines to
+  disclose whether one exists, so a test asserting 404 asserts the wrong thing.
 
 ## Point it somewhere else
 

@@ -9,5 +9,8 @@ cd "$(dirname "$0")"
 ./40-mcp.sh
 ./50-agentgateway.sh
 ./60-mcp-openapi.sh
-step "smoke test"
+step "smoke test: the auth chain"
 "$PYTHON" ./smoke-test.py
+
+step "end-to-end: mcp-openapi against the real Harbor"
+"$PYTHON" ./test-openapi-e2e.py
